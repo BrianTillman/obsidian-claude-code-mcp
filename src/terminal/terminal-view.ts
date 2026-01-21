@@ -1,4 +1,4 @@
-import { ItemView, WorkspaceLeaf, Notice, App } from "obsidian";
+import { ItemView, WorkspaceLeaf, Notice, App, ViewStateResult } from "obsidian";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { spawn, ChildProcess } from "child_process";
@@ -21,6 +21,14 @@ export class ClaudeTerminalView extends ItemView {
 	private isDestroyed = false;
 	public app: App;
 	private plugin: ClaudeMcpPlugin;
+	private _instanceId: number = 1;
+
+	/**
+	 * Get the instance ID for this terminal
+	 */
+	get instanceId(): number {
+		return this._instanceId;
+	}
 
 	constructor(leaf: WorkspaceLeaf, plugin: ClaudeMcpPlugin) {
 		super(leaf);
@@ -40,11 +48,40 @@ export class ClaudeTerminalView extends ItemView {
 	}
 
 	getDisplayText(): string {
-		return "Claude Terminal";
+		return `Claude Terminal ${this._instanceId}`;
 	}
 
 	getIcon(): string {
 		return "claude-logo";
+	}
+
+	/**
+	 * Save view state for workspace restoration
+	 */
+	getState(): Record<string, unknown> {
+		return {
+			instanceId: this._instanceId,
+		};
+	}
+
+	/**
+	 * Restore view state from workspace
+	 * Called by Obsidian before onOpen() when restoring workspace
+	 */
+	async setState(
+		state: Record<string, unknown>,
+		result: ViewStateResult
+	): Promise<void> {
+		if (state && typeof state.instanceId === "number") {
+			this._instanceId = state.instanceId;
+			// Register this ID as used with the plugin
+			if (
+				this.plugin &&
+				typeof (this.plugin as any).usedTerminalIds?.add === "function"
+			) {
+				(this.plugin as any).usedTerminalIds.add(this._instanceId);
+			}
+		}
 	}
 
 	async onOpen(): Promise<void> {
@@ -141,8 +178,16 @@ export class ClaudeTerminalView extends ItemView {
 	}
 
 	async onClose(): Promise<void> {
-		console.debug("[Terminal] Closing terminal view");
+		console.debug(`[Terminal] Closing terminal ${this._instanceId}`);
 		this.isDestroyed = true;
+
+		// Notify plugin to release the terminal ID
+		if (
+			this.plugin &&
+			typeof (this.plugin as any).releaseTerminalId === "function"
+		) {
+			(this.plugin as any).releaseTerminalId(this._instanceId);
+		}
 
 		if (this.pseudoterminal) {
 			this.pseudoterminal.kill().catch((error: unknown) => {
