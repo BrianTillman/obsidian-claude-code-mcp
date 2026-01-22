@@ -24,6 +24,7 @@ export default class ClaudeMcpPlugin extends Plugin {
 	private usedTerminalIds: Set<number> = new Set();
 	private lastFocusedTerminalLeaf: WorkspaceLeaf | null = null;
 	private static readonly MAX_TERMINALS = 10;
+	private terminalViewType: string | null = null; // Cached to avoid repeated imports
 
 	/* ---------------- core lifecycle ---------------- */
 
@@ -63,6 +64,11 @@ export default class ClaudeMcpPlugin extends Plugin {
 	onunload() {
 		this.mcpServer?.stop();
 		this.removeTerminalRibbonIcon();
+
+		// Cleanup multi-terminal state
+		this.usedTerminalIds.clear();
+		this.lastFocusedTerminalLeaf = null;
+		this.terminalViewType = null;
 	}
 
 	async initializeMcpServer(): Promise<void> {
@@ -230,6 +236,9 @@ export default class ClaudeMcpPlugin extends Plugin {
 				"./src/terminal/terminal-view"
 			);
 
+			// Cache the view type to avoid repeated imports
+			this.terminalViewType = TERMINAL_VIEW_TYPE;
+
 			// Register terminal view
 			this.registerView(
 				TERMINAL_VIEW_TYPE,
@@ -260,12 +269,10 @@ export default class ClaudeMcpPlugin extends Plugin {
 
 			// Track terminal focus changes for MRU (most recently used)
 			this.registerEvent(
-				this.app.workspace.on("active-leaf-change", async (leaf) => {
-					if (leaf) {
-						const { TERMINAL_VIEW_TYPE: termType } = await import(
-							"./src/terminal/terminal-view"
-						);
-						const terminals = this.app.workspace.getLeavesOfType(termType);
+				this.app.workspace.on("active-leaf-change", (leaf) => {
+					if (leaf && this.terminalViewType) {
+						const terminals =
+							this.app.workspace.getLeavesOfType(this.terminalViewType);
 						if (terminals.includes(leaf)) {
 							this.lastFocusedTerminalLeaf = leaf;
 						}
@@ -309,10 +316,7 @@ export default class ClaudeMcpPlugin extends Plugin {
 
 			if (activeIsTerminal && activeLeaf) {
 				// Active leaf is a terminal - close it
-				const view = activeLeaf.view as any;
-				if (view?.instanceId) {
-					this.releaseTerminalId(view.instanceId);
-				}
+				// Note: onClose() in the terminal view handles releasing the ID
 				activeLeaf.detach();
 
 				// Update last focused to another terminal if one exists
@@ -407,11 +411,8 @@ export default class ClaudeMcpPlugin extends Plugin {
 			const leaves = this.app.workspace.getLeavesOfType(TERMINAL_VIEW_TYPE);
 
 			// Close sequentially to avoid race conditions
+			// Note: onClose() in each terminal view handles releasing the IDs
 			for (const leaf of leaves) {
-				const view = leaf.view as any;
-				if (view?.instanceId) {
-					this.releaseTerminalId(view.instanceId);
-				}
 				leaf.detach();
 			}
 

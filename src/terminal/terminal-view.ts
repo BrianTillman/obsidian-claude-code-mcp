@@ -189,6 +189,14 @@ export class ClaudeTerminalView extends ItemView {
 			(this.plugin as any).releaseTerminalId(this._instanceId);
 		}
 
+		// Clear lastFocusedTerminalLeaf if it references this terminal
+		if (
+			this.plugin &&
+			(this.plugin as any).lastFocusedTerminalLeaf === this.leaf
+		) {
+			(this.plugin as any).lastFocusedTerminalLeaf = null;
+		}
+
 		if (this.pseudoterminal) {
 			this.pseudoterminal.kill().catch((error: unknown) => {
 				console.error(
